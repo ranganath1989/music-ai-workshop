@@ -4,10 +4,17 @@ import random
 import time
 from streamlit_gsheets import GSheetsConnection
 import streamlit.components.v1 as components
+from streamlit_qrcode_scanner import qrcode_scanner
 
 # --- 1. CONFIGURATION & UI HIDER ---
-st.set_page_config(page_title="Raga AI Workshop", page_icon="🎶", layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="Raga AI Workshop", 
+    page_icon="🎶", 
+    layout="centered", 
+    initial_sidebar_state="collapsed"
+)
 
+# Total Lockdown CSS to hide Streamlit branding and icons
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -18,8 +25,10 @@ hide_st_style = """
             .stDeployButton {display:none;}
             .viewerBadge_container__1QSob {display:none !important;}
             .viewerBadge_link__3_79W {display:none !important;}
+            
             .main { background-color: #0e1117; }
-            .stTable td, .stTable th { color: white !important; background-color: #1e2130 !important; }
+            .stProgress > div > div > div > div { background-color: #00d4ff; }
+            .stTable td, .stTable th { color: white !important; background-color: #1e2130 !important; border: 1px solid #30363d !important; }
             .notation-box { background-color: #121212; border: 2px solid #00d4ff; border-radius: 15px; padding: 20px; text-align: center; }
             .swara { color: #00d4ff; font-size: 26px; font-family: monospace; font-weight: bold; }
             </style>
@@ -49,30 +58,47 @@ def save_score(group, score):
 # --- 3. SESSION STATE ---
 if 'phase' not in st.session_state:
     st.session_state.update({
-        'phase': 'login', 'score': 0, 'lives': 3, 'q_idx': 0, 'group': "", 
-        'questions': [], 'current_options': [], 'start_time': None, 
+        'phase': 'login', 'unlocked': False, 'score': 0, 'lives': 3, 'q_idx': 0, 
+        'group': "", 'questions': [], 'current_options': [], 'start_time': None, 
         'answered': False, 'leaderboard_saved': False, 'last_result': ""
     })
 
-# --- PHASE 1: LOGIN ---
+# --- PHASE 1: LOGIN (QR ENTRY) ---
 if st.session_state.phase == 'login':
     st.title("🎶 Raga AI Challenge")
-    with st.form("login"):
-        group_input = st.text_input("Group Name:", placeholder="Enter Team Name")
-        if st.form_submit_button("🚀 START CHALLENGE"):
-            if group_input:
-                with st.status("🎼 Tuning AI Models...", expanded=True) as status:
-                    raw_data = load_data()
-                    time.sleep(0.7)
-                    if raw_data:
-                        st.session_state.update({
-                            'questions': random.sample(raw_data, len(raw_data)),
-                            'group': group_input, 'phase': 'playing', 'q_idx': 0, 
-                            'score': 0, 'lives': 3, 'start_time': time.time()
-                        })
-                        status.update(label="✅ Ready!", state="complete")
-                        time.sleep(0.5)
-                        st.rerun()
+    
+    if not st.session_state.unlocked:
+        st.subheader("📷 Scan Workshop QR to Enter")
+        # Initialize Scanner
+        qr_data = qrcode_scanner(key='qr_scanner')
+        
+        # Secret Code Verification
+        if qr_data == "RAGA2026": 
+            st.session_state.unlocked = True
+            st.balloons()
+            st.rerun()
+        elif qr_data:
+            st.error("Invalid QR Code. Please scan the official workshop code.")
+            
+    else:
+        with st.form("login"):
+            st.success("Access Granted! Welcome to the Challenge.")
+            group_input = st.text_input("Group Name:", placeholder="Enter Team Name")
+            if st.form_submit_button("🚀 START CHALLENGE"):
+                if group_input:
+                    with st.status("🎼 Tuning AI Models...", expanded=True) as status:
+                        raw_data = load_data()
+                        time.sleep(0.7)
+                        if raw_data:
+                            st.session_state.update({
+                                'questions': random.sample(raw_data, len(raw_data)),
+                                'group': group_input, 'phase': 'playing', 'q_idx': 0, 
+                                'score': 0, 'lives': 3, 'start_time': time.time()
+                            })
+                            status.update(label="✅ Ready!", state="complete")
+                            st.rerun()
+                else:
+                    st.warning("Please enter a group name!")
 
 # --- PHASE 2: PLAYING ---
 elif st.session_state.phase == 'playing':
@@ -93,6 +119,7 @@ elif st.session_state.phase == 'playing':
         
         st.progress(max(0.0, remaining / 60))
         
+        # Isolated Audio Engine
         audio_url = current_q['audio_url'].replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
         components.html(f"""
             <style>
@@ -115,6 +142,7 @@ elif st.session_state.phase == 'playing':
             choice = st.radio("Which Raga?", st.session_state.current_options, index=None)
             if st.form_submit_button("SUBMIT"):
                 if choice:
+                    # JavaScript Kill-Switch for Audio
                     components.html("""<script>var p = parent.document.getElementById("aud"); if(p){p.pause(); p.src=""; p.remove();}</script>""", height=0)
                     st.session_state.answered = True
                     if choice == current_q['raga']: 
