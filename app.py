@@ -104,15 +104,28 @@ elif st.session_state.phase == 'playing':
     c2.metric("Lives Left", "❤️" * st.session_state.lives)
     st.write(f"Question {st.session_state.q_idx + 1} of {len(st.session_state.questions)}")
 
-    # --- AUTO-PLAY AUDIO ENGINE ---
+# --- UPDATED AUTO-PLAY ENGINE ---
     if pd.notna(current_q.get('audio_url')):
-        # Using a unique key (q_idx) ensures the audio element reloads for every new song
+        # Ensure it's the RAW link
+        raw_audio_url = current_q['audio_url'].replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+        
+        # We use a key based on q_idx to force the browser to see it as a NEW element
         st.markdown(f"""
-            <audio autoplay key="audio_{st.session_state.q_idx}">
-                <source src="{current_q['audio_url']}" type="audio/mpeg">
-            </audio>
+            <div style="display:none;">
+                <audio id="ragaAudio" autoplay key="{st.session_state.q_idx}">
+                    <source src="{raw_audio_url}" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+            <script>
+                var audio = document.getElementById("ragaAudio");
+                audio.volume = 1.0;
+                audio.play().catch(function(error) {{
+                    console.log("Autoplay blocked. User must interact first.");
+                }});
+            </script>
         """, unsafe_allow_html=True)
-        st.caption("🔈 Playing song snippet...")
+        st.caption(f"🎵 Now playing audio for Question {st.session_state.q_idx + 1}...")
 
     st.divider()
 
