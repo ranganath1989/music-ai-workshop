@@ -1,187 +1,193 @@
 import streamlit as st
 import pandas as pd
 import random
+import time
 from streamlit_gsheets import GSheetsConnection
+import streamlit.components.v1 as components
 
-# --- 1. APP CONFIGURATION ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Raga AI Workshop", page_icon="🎶", layout="centered")
 
-# --- 2. CUSTOM CSS FOR A CLEAN INTERFACE ---
+SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1qvhy03uzkomxsET6s60mrUC7ouJBOFpb0gosz5ZPzY0"
+
+# --- 2. PREMIUM STYLING ---
 st.markdown("""
 <style>
     .main { background-color: #0e1117; }
+    .stProgress > div > div > div > div { background-color: #00d4ff; }
+    
+    /* Table Visibility Fix */
+    .stTable td, .stTable th {
+        color: white !important;
+        background-color: #1e2130 !important;
+    }
+    
     .notation-box {
-        background-color: #121212;
-        border: 2px solid #00d4ff;
-        border-radius: 15px;
-        padding: 20px;
-        text-align: center;
-        margin: 15px 0;
-        box-shadow: 0 0 15px rgba(0, 212, 255, 0.2);
+        background-color: #121212; border: 2px solid #00d4ff;
+        border-radius: 15px; padding: 20px; text-align: center; margin-top: 15px;
     }
-    .swara {
-        color: #00d4ff;
-        font-size: 26px;
-        font-family: 'Courier New', monospace;
-        letter-spacing: 6px;
-        font-weight: bold;
+    .swara { color: #00d4ff; font-size: 26px; font-family: monospace; font-weight: bold; }
+    
+    .visualizer-container {
+        display: flex; justify-content: center; gap: 5px; height: 60px; margin: 20px 0;
     }
-    .stButton>button {
-        width: 100%;
-        border-radius: 12px;
-        height: 3em;
-        font-weight: bold;
+    .bar {
+        width: 8px; background-color: #00d4ff; border-radius: 4px;
+        animation: pulse 1s ease-in-out infinite;
     }
-    /* Larger radio options for mobile tapping */
-    div[data-baseweb="radio"] > div {
-        padding: 15px;
-        border-radius: 10px;
-        background-color: #1e1e1e;
-        margin-bottom: 8px;
-        border: 1px solid #333;
-    }
+    @keyframes pulse { 0%, 100% { height: 10px; opacity: 0.5; } 50% { height: 40px; opacity: 1; } }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DATA FETCHING ---
-@st.cache_data(ttl=60)
+# --- 3. DATA HELPERS ---
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_data():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        df = conn.read()
+        df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet="SongsInfo") 
         return df.to_dict('records')
-    except Exception as e:
-        st.error(f"Spreadsheet Error: {e}")
-        return []
+    except: return []
 
-# --- 4. SESSION STATE INITIALIZATION ---
+def save_score(group, score):
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        # Force fresh read to avoid header conflicts
+        df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet="Leaderboard", ttl=0)
+        new_row = pd.DataFrame([{"Group": str(group), "Score": int(score)}])
+        updated_df = pd.concat([df, new_row], ignore_index=True).fillna("")
+        conn.update(spreadsheet=SPREADSHEET_URL, worksheet="Leaderboard", data=updated_df)
+        return True
+    except: return False
+
+# --- 4. SESSION STATE ---
 if 'phase' not in st.session_state:
-    st.session_state.phase = 'login'
-    st.session_state.score = 0
-    st.session_state.lives = 3
-    st.session_state.q_idx = 0
-    st.session_state.group = ""
-    st.session_state.questions = []
-    st.session_state.hint_active = False
-    st.session_state.current_options = []
+    st.session_state.update({
+        'phase': 'login', 'score': 0, 'lives': 3, 'q_idx': 0,
+        'group': "", 'questions': [], 'current_options': [],
+        'start_time': None, 'answered': False, 'leaderboard_saved': False, 
+        'last_result': ""
+    })
 
 # --- PHASE 1: LOGIN ---
 if st.session_state.phase == 'login':
     st.title("🎶 Raga AI Challenge")
-    st.write("Listen to the song and identify the Raga. Good luck!")
-    
     with st.form("login_form"):
-        group_input = st.text_input("Group Name:", placeholder="Team Name")
-        submit = st.form_submit_button("🚀 START GAME")
-        
-        if submit:
+        group_input = st.text_input("Group Name:", placeholder="Enter Team Name")
+        if st.form_submit_button("🚀 START CHALLENGE"):
             if group_input:
-                raw_data = load_data()
-                if raw_data:
-                    shuffled = raw_data.copy()
-                    random.shuffle(shuffled)
-                    st.session_state.questions = shuffled
-                    st.session_state.group = group_input
-                    st.session_state.phase = 'playing'
-                    st.rerun()
-                else:
-                    st.error("No songs found in the database!")
+                with st.status("🎼 Tuning AI Models...", expanded=False) as s:
+                    st.write("Fetching Raga Data...")
+                    raw_data = load_data()
+                    time.sleep(0.7)
+                    if raw_data:
+                        st.session_state.update({
+                            'questions': random.sample(raw_data, len(raw_data)),
+                            'group': group_input, 'phase': 'playing', 'q_idx': 0, 
+                            'score': 0, 'lives': 3, 'start_time': time.time()
+                        })
+                        s.update(label="✅ Ready!", state="complete")
+                        time.sleep(0.5)
+                        st.rerun()
             else:
-                st.warning("Please enter your team name.")
+                st.warning("Please enter a group name!")
 
 # --- PHASE 2: PLAYING ---
 elif st.session_state.phase == 'playing':
     if st.session_state.lives <= 0 or st.session_state.q_idx >= len(st.session_state.questions):
-        st.session_state.phase = 'game_over'
-        st.rerun()
+        st.session_state.phase = 'game_over'; st.rerun()
 
     current_q = st.session_state.questions[st.session_state.q_idx]
-    
-    # --- HEADER ---
-    st.subheader(f"👥 {st.session_state.group}")
+
     c1, c2 = st.columns(2)
     c1.metric("Score", st.session_state.score)
-    c2.metric("Lives Left", "❤️" * st.session_state.lives)
-    st.write(f"Question {st.session_state.q_idx + 1} of {len(st.session_state.questions)}")
+    c2.markdown(f"<div style='text-align:right; font-size:24px;'>{'❤️' * st.session_state.lives}</div>", unsafe_allow_html=True)
 
-# --- UPDATED AUTO-PLAY ENGINE ---
-    if pd.notna(current_q.get('audio_url')):
-        # Ensure it's the RAW link
-        raw_audio_url = current_q['audio_url'].replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+    if not st.session_state.answered:
+        elapsed = time.time() - st.session_state.start_time
+        remaining = int(60 - elapsed)
+        if remaining <= 0:
+            st.session_state.answered = True; st.session_state.lives -= 1; st.session_state.last_result = "timeout"; st.rerun()
         
-        # We use a key based on q_idx to force the browser to see it as a NEW element
-        st.markdown(f"""
-            <div style="display:none;">
-                <audio id="ragaAudio" autoplay key="{st.session_state.q_idx}">
-                    <source src="{raw_audio_url}" type="audio/mpeg">
-                    Your browser does not support the audio element.
-                </audio>
+        st.progress(max(0.0, remaining / 60))
+        st.write(f"⏳ **{max(0, remaining)}s**")
+
+        # AUDIO ISOLATION ENGINE (IFrame approach to force-kill audio)
+        audio_url = current_q['audio_url'].replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
+        components.html(f"""
+            <style>
+                .vc {{ display: flex; justify-content: center; gap: 5px; height: 40px; }}
+                .bar {{ width: 8px; background-color: #00d4ff; border-radius: 4px; animation: p 1s infinite; }}
+                @keyframes p {{ 0%, 100% {{ height: 10px; }} 50% {{ height: 40px; }} }}
+            </style>
+            <div class="vc">
+                <div class="bar" style="animation-delay:0.1s"></div>
+                <div class="bar" style="animation-delay:0.3s"></div>
+                <div class="bar" style="animation-delay:0.5s"></div>
             </div>
-            <script>
-                var audio = document.getElementById("ragaAudio");
-                audio.volume = 1.0;
-                audio.play().catch(function(error) {{
-                    console.log("Autoplay blocked. User must interact first.");
-                }});
-            </script>
-        """, unsafe_allow_html=True)
-        st.caption(f"🎵 Now playing audio for Question {st.session_state.q_idx + 1}...")
+            <audio autoplay loop><source src="{audio_url}" type="audio/mpeg"></audio>
+        """, height=60)
 
-    st.divider()
+        if not st.session_state.current_options:
+            all_r = list(set([q['raga'] for q in st.session_state.questions]))
+            opts = random.sample([r for r in all_r if r != current_q['raga']], 3) + [current_q['raga']]
+            random.shuffle(opts); st.session_state.current_options = opts
 
-    # --- HINT LOGIC ---
-    if st.button("✨ Need a Hint? Reveal AI Notation"):
-        st.session_state.hint_active = True
+        with st.form("quiz"):
+            choice = st.radio("Which Raga is this?", st.session_state.current_options, index=None)
+            if st.form_submit_button("SUBMIT"):
+                if choice:
+                    st.session_state.answered = True
+                    if choice == current_q['raga']: 
+                        st.session_state.score += 10
+                        st.session_state.last_result = "correct"
+                    else: 
+                        st.session_state.lives -= 1
+                        st.session_state.last_result = "wrong"
+                    st.rerun()
 
-    if st.session_state.hint_active:
-        st.markdown(f"""
-        <div class="notation-box">
-            <p style="color: gray; font-size: 11px;">AI NOTATION ANALYSIS</p>
-            <div class="swara">{current_q['notation']}</div>
-            <p style="color: #00d4ff; font-size: 14px; margin-top:10px;">
-                💡 {random.choice(str(current_q['clues']).split(';'))}
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.expander("💡 Hint"):
+            st.markdown(f"<div class='notation-box'><div class='swara'>{current_q['notation']}</div></div>", unsafe_allow_html=True)
+        time.sleep(1); st.rerun()
 
-    # --- OPTIONS PERSISTENCE ---
-    # We generate options once per question index so they don't reshuffle on every click
-    if not st.session_state.current_options or len(st.session_state.current_options) == 0:
-        all_ragas = list(set([q['raga'] for q in st.session_state.questions]))
-        wrong = [r for r in all_ragas if r != current_q['raga']]
-        options = random.sample(wrong, min(3, len(wrong))) + [current_q['raga']]
-        random.shuffle(options)
-        st.session_state.current_options = options
-
-    # --- SUBMISSION FORM ---
-    with st.form("answer_form"):
-        choice = st.radio("Which Raga is this song based on?", st.session_state.current_options, index=None)
-        submitted = st.form_submit_button("SUBMIT ANSWER")
+    else:
+        if st.session_state.last_result == "correct":
+            st.balloons(); st.success("✅ Correct!")
+        else:
+            st.error(f"❌ Wrong! It was {current_q['raga']}")
         
-        if submitted:
-            if choice:
-                if choice == current_q['raga']:
-                    st.session_state.score += 10
-                    st.toast("Correct!", icon="✅")
-                else:
-                    st.session_state.lives -= 1
-                    st.toast(f"Wrong! It was {current_q['raga']}", icon="❌")
-                
-                # Prepare for next question
-                st.session_state.q_idx += 1
-                st.session_state.hint_active = False
-                st.session_state.current_options = [] # Clear options for next round
-                st.rerun()
-            else:
-                st.warning("Please select an option before submitting!")
+        time.sleep(2.5)
+        st.session_state.update({'q_idx': st.session_state.q_idx + 1, 'answered': False, 'current_options': [], 'start_time': time.time()})
+        st.rerun()
 
 # --- PHASE 3: GAME OVER ---
 else:
+    st.title("🏆 Challenge Complete!")
     st.balloons()
-    st.title("🏆 Final Score: " + str(st.session_state.score))
-    st.subheader(f"Well played, Team {st.session_state.group}!")
-    st.write("Show this screen to the organizers for the final leaderboard.")
+    st.header(f"Final Score: {st.session_state.score}")
     
+    if not st.session_state.leaderboard_saved:
+        with st.status("🌟 Syncing with Hall of Fame...", expanded=True) as status:
+            if save_score(st.session_state.group, st.session_state.score):
+                st.session_state.leaderboard_saved = True
+                status.update(label="✅ Score Saved!", state="complete")
+            else:
+                status.update(label="⚠️ Sync delay - reloading table...", state="complete")
+
+    st.divider()
+    st.subheader("🌟 Hall of Fame (Top 10)")
+    
+    with st.spinner("Fetching Hall of Fame data..."):
+        try:
+            conn = st.connection("gsheets", type=GSheetsConnection)
+            # ttl=0 is critical here to show the data immediately after saving
+            lb_df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet="Leaderboard", ttl=0)
+            if lb_df is not None and not lb_df.empty:
+                top_10 = lb_df.sort_values(by="Score", ascending=False).head(10).reset_index(drop=True)
+                st.table(top_10)
+            else:
+                st.info("Leaderboard is currently empty.")
+        except:
+            st.error("Connection lost. Please refresh.")
+
     if st.button("Play Again"):
-        st.session_state.clear()
-        st.rerun()
+        st.session_state.clear(); st.rerun()
