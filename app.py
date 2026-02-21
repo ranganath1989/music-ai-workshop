@@ -6,36 +6,18 @@ from streamlit_gsheets import GSheetsConnection
 import streamlit.components.v1 as components
 
 # --- 1. CONFIGURATION & UI HIDER ---
-st.set_page_config(
-    page_title="Raga AI Workshop", 
-    page_icon="🎶", 
-    layout="centered", 
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="Raga AI Workshop", page_icon="🎶", layout="centered", initial_sidebar_state="collapsed")
 
-# This CSS hides the GitHub icon, "Deploy" button, and Streamlit menu
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             header {visibility: hidden;}
             footer {visibility: hidden;}
             #stDecoration {display:none;}
-            
-            /* General App Styling */
+            [data-testid="stStatusWidget"] {visibility: hidden;}
             .main { background-color: #0e1117; }
-            .stProgress > div > div > div > div { background-color: #00d4ff; }
-            
-            /* Table Visibility Fix */
-            .stTable td, .stTable th {
-                color: white !important;
-                background-color: #1e2130 !important;
-                border: 1px solid #30363d !important;
-            }
-            
-            .notation-box {
-                background-color: #121212; border: 2px solid #00d4ff;
-                border-radius: 15px; padding: 20px; text-align: center; margin-top: 15px;
-            }
+            .stTable td, .stTable th { color: white !important; background-color: #1e2130 !important; }
+            .notation-box { background-color: #121212; border: 2px solid #00d4ff; border-radius: 15px; padding: 20px; text-align: center; }
             .swara { color: #00d4ff; font-size: 26px; font-family: monospace; font-weight: bold; }
             </style>
             """
@@ -48,8 +30,7 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1qvhy03uzkomxsET6s60mr
 def load_data():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet="SongsInfo") 
-        return df.to_dict('records')
+        return conn.read(spreadsheet=SPREADSHEET_URL, worksheet="SongsInfo").to_dict('records')
     except: return []
 
 def save_score(group, score):
@@ -65,21 +46,19 @@ def save_score(group, score):
 # --- 3. SESSION STATE ---
 if 'phase' not in st.session_state:
     st.session_state.update({
-        'phase': 'login', 'score': 0, 'lives': 3, 'q_idx': 0,
-        'group': "", 'questions': [], 'current_options': [],
-        'start_time': None, 'answered': False, 'leaderboard_saved': False, 
-        'last_result': ""
+        'phase': 'login', 'score': 0, 'lives': 3, 'q_idx': 0, 'group': "", 
+        'questions': [], 'current_options': [], 'start_time': None, 
+        'answered': False, 'leaderboard_saved': False, 'last_result': ""
     })
 
 # --- PHASE 1: LOGIN ---
 if st.session_state.phase == 'login':
     st.title("🎶 Raga AI Challenge")
-    with st.form("login_form"):
+    with st.form("login"):
         group_input = st.text_input("Group Name:", placeholder="Enter Team Name")
         if st.form_submit_button("🚀 START CHALLENGE"):
             if group_input:
-                with st.status("🎼 Preparing Musical Environment...", expanded=True) as status:
-                    st.write("Fetching Raga Data...")
+                with st.status("🎼 Tuning AI Models...", expanded=True) as status:
                     raw_data = load_data()
                     time.sleep(0.7)
                     if raw_data:
@@ -91,8 +70,6 @@ if st.session_state.phase == 'login':
                         status.update(label="✅ Ready!", state="complete")
                         time.sleep(0.5)
                         st.rerun()
-            else:
-                st.warning("Please enter a group name!")
 
 # --- PHASE 2: PLAYING ---
 elif st.session_state.phase == 'playing':
@@ -112,9 +89,7 @@ elif st.session_state.phase == 'playing':
             st.session_state.answered = True; st.session_state.lives -= 1; st.session_state.last_result = "timeout"; st.rerun()
         
         st.progress(max(0.0, remaining / 60))
-        st.write(f"⏳ **{max(0, remaining)}s**")
-
-        # AUDIO ISOLATION ENGINE
+        
         audio_url = current_q['audio_url'].replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
         components.html(f"""
             <style>
@@ -123,9 +98,7 @@ elif st.session_state.phase == 'playing':
                 @keyframes p {{ 0%, 100% {{ height: 10px; }} 50% {{ height: 40px; }} }}
             </style>
             <div class="vc">
-                <div class="bar" style="animation-delay:0.1s"></div>
-                <div class="bar" style="animation-delay:0.3s"></div>
-                <div class="bar" style="animation-delay:0.5s"></div>
+                <div class="bar" style="animation-delay:0.1s"></div><div class="bar" style="animation-delay:0.3s"></div><div class="bar" style="animation-delay:0.5s"></div>
             </div>
             <audio autoplay loop id="aud"><source src="{audio_url}" type="audio/mpeg"></audio>
         """, height=60)
@@ -136,10 +109,9 @@ elif st.session_state.phase == 'playing':
             random.shuffle(opts); st.session_state.current_options = opts
 
         with st.form("quiz"):
-            choice = st.radio("Which Raga is this?", st.session_state.current_options, index=None)
+            choice = st.radio("Which Raga?", st.session_state.current_options, index=None)
             if st.form_submit_button("SUBMIT"):
                 if choice:
-                    # JavaScript Kill-Switch for browser media stream
                     components.html("""<script>var p = parent.document.getElementById("aud"); if(p){p.pause(); p.src=""; p.remove();}</script>""", height=0)
                     st.session_state.answered = True
                     if choice == current_q['raga']: 
@@ -157,8 +129,7 @@ elif st.session_state.phase == 'playing':
     else:
         if st.session_state.last_result == "correct":
             st.balloons(); st.success("✅ Correct!")
-        else:
-            st.error(f"❌ Wrong! It was {current_q['raga']}")
+        else: st.error(f"❌ It was {current_q['raga']}")
         time.sleep(2.5)
         st.session_state.update({'q_idx': st.session_state.q_idx + 1, 'answered': False, 'current_options': [], 'start_time': time.time()})
         st.rerun()
@@ -167,30 +138,17 @@ elif st.session_state.phase == 'playing':
 else:
     st.title("🏆 Challenge Complete!")
     st.balloons()
-    st.header(f"Final Score: {st.session_state.score}")
-    
     if not st.session_state.leaderboard_saved:
-        with st.status("🌟 Syncing with Hall of Fame...", expanded=True) as status:
-            if save_score(st.session_state.group, st.session_state.score):
-                st.session_state.leaderboard_saved = True
-                status.update(label="✅ Score Saved!", state="complete")
-            else:
-                status.update(label="⚠️ Sync delay - reloading table...", state="complete")
+        with st.status("🌟 Syncing Score...", expanded=True):
+            save_score(st.session_state.group, st.session_state.score)
+            st.session_state.leaderboard_saved = True
 
-    st.divider()
     st.subheader("🌟 Hall of Fame (Top 10)")
-    
-    with st.spinner("Fetching Hall of Fame data..."):
-        try:
-            conn = st.connection("gsheets", type=GSheetsConnection)
-            lb_df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet="Leaderboard", ttl=0)
-            if lb_df is not None and not lb_df.empty:
-                top_10 = lb_df.sort_values(by="Score", ascending=False).head(10).reset_index(drop=True)
-                st.table(top_10)
-            else:
-                st.info("Leaderboard is currently empty.")
-        except Exception as e:
-            st.error("Connection lost. Please refresh.")
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        lb_df = conn.read(spreadsheet=SPREADSHEET_URL, worksheet="Leaderboard", ttl=0)
+        st.table(lb_df.sort_values(by="Score", ascending=False).head(10).reset_index(drop=True))
+    except: st.error("Table sync failed.")
 
     if st.button("Play Again"):
         st.session_state.clear(); st.rerun()
