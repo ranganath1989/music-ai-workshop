@@ -15,6 +15,9 @@ hide_st_style = """
             footer {visibility: hidden;}
             #stDecoration {display:none;}
             [data-testid="stStatusWidget"] {visibility: hidden;}
+            .stDeployButton {display:none;}
+            .viewerBadge_container__1QSob {display:none !important;}
+            .viewerBadge_link__3_79W {display:none !important;}
             .main { background-color: #0e1117; }
             .stTable td, .stTable th { color: white !important; background-color: #1e2130 !important; }
             .notation-box { background-color: #121212; border: 2px solid #00d4ff; border-radius: 15px; padding: 20px; text-align: center; }
